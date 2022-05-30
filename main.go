@@ -45,7 +45,6 @@ func main() {
 }
 
 func writeUSTresory() error {
-	dt := time.Now()
 	sheet := "US Tresory"
 	f.NewSheet(sheet)
 	f.SetActiveSheet(1)
@@ -68,9 +67,9 @@ func writeUSTresory() error {
 	for {
 		if prevMonth != curMonth {
 			var err error
-			data, err = treasury.FetchData(dt)
+			data, err = treasury.FetchData(currDate)
 			if err != nil {
-				return fmt.Errorf("error fetching treasury data for date %s: %w", fmt.Sprintf("%v-%v-%v", dt.Year(), int(dt.Month()), dt.Day()), err)
+				return fmt.Errorf("error fetching treasury data for date %s: %w", dateString(currDate), err)
 			}
 
 		}
@@ -93,7 +92,6 @@ func writeUSTresory() error {
 func getTreasRowData(date time.Time, treas *treasury.Treasury) []interface{} {
 	props, err := treas.GetPropsForDate(dateString(date))
 	if err != nil {
-		fmt.Println(fmt.Errorf("error getting props for date: %s: %w", dateString(date), err))
 		return []interface{}{colDateString(date), "n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"}
 	}
 	return []interface{}{colDateString(date), formatFloat(props.Bc1Year.Content), formatFloat(props.Bc2Year.Content), formatFloat(props.Bc3Year.Content), formatFloat(props.Bc4Year.Content), formatFloat(props.Bc5Year.Content), formatFloat(props.Bc6Year.Content), formatFloat(props.Bc7Year.Content), formatFloat(props.Bc8Year.Content), formatFloat(props.Bc10Year.Content)}
@@ -143,8 +141,6 @@ func writeOECSheet() {
 		if err := f.SetSheetRow(sheet, fmt.Sprintf("A%v", line), &data); err != nil {
 			panic(err)
 		}
-		fmt.Println("currdate: ", currDate)
-		//  writeLine(sheet, strconv.Itoa(line), data)
 		currDate = currDate.Add(24 * time.Hour)
 		line++
 		if currDate.After(now) {
