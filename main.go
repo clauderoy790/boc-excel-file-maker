@@ -8,12 +8,13 @@ import (
 	"time"
 
 	boc "github.com/clauderoy790/bank-of-canada-interests-rates"
+	"github.com/clauderoy790/boc-excel-file-maker/treasury"
 	"github.com/xuri/excelize/v2"
 )
 
 const header = "Historique taux des obligations\nhttp://www.banqueducanada.ca/taux/taux-dinteret/obligations-canadiennes/\n** À partir du 20/04/2021,Taux 1 an = taux 2 ans\n"
 const startDate = "2014-10-24"
-const exportPath = "/Users/clauderoy/Desktop/test.xls"
+const exportPath = "/Users/clauderoy/Desktop/test.xlsx"
 
 var bank boc.BOCInterests
 var f *excelize.File
@@ -25,9 +26,10 @@ func main() {
 		panic(fmt.Errorf("error creating boc: %w", err))
 	}
 
-	exportPath :=  "/Users/clauderoy/Desktop/test.xls"
 	f = excelize.NewFile()
-	writeOECSheet(exportPath)
+	writeOECSheet()
+	writeUSTresory()
+	WriteWallStPrime()
 	// Save spreadsheet
 	if err := f.SaveAs(exportPath); err != nil {
 		panic(fmt.Errorf("failed to write file: %w", err))
@@ -52,7 +54,25 @@ func main() {
 	// a.Wait()
 }
 
-func writeOECSheet(path string) {
+func writeUSTresory() error {
+	data, err := treasury.FetchData()
+	if err != nil {
+		return fmt.Errorf("error fetching treasury data: %w", err)
+	}
+	fmt.Println("data: ", data)
+	return nil
+	f.NewSheet("US Tresory")
+	f.SetActiveSheet(1)
+	return nil
+
+}
+
+func WriteWallStPrime() {
+	f.NewSheet("Wall St Prime")
+	f.SetActiveSheet(2)
+}
+
+func writeOECSheet() {
 	// Create a new sheet.
 	sheet := "OEC"
 	f.SetActiveSheet(0)
@@ -66,7 +86,9 @@ func writeOECSheet(path string) {
 			panic(fmt.Errorf("error setting sheet vlaue: %w", err))
 		}
 	}
-	writeLine(sheet, "5", []string{"Taux en date du:", "1 a 3 ans", "1 an", "2 ans", "3 ans", "4 ans", "5 ans"})
+	if err := f.SetSheetRow(sheet, "A5", &[]interface{}{"Taux en date du:", "1 a 3 ans", "1 an", "2 ans", "3 ans", "4 ans", "5 ans"}); err != nil {
+		panic(err)
+	}
 
 	date, err := boc.FormatDate(startDate)
 	if err != nil {
@@ -87,7 +109,10 @@ func writeOECSheet(path string) {
 		if err != nil {
 			panic(fmt.Errorf("error building row: %w", err))
 		}
-		writeLine(sheet, strconv.Itoa(line), data)
+		if err := f.SetSheetRow(sheet, fmt.Sprintf("A%v", line), &data); err != nil {
+			panic(err)
+		}
+		//  writeLine(sheet, strconv.Itoa(line), data)
 		currDate = currDate.Add(24 * time.Hour)
 		line++
 		if currDate.After(now) {
@@ -97,18 +122,10 @@ func writeOECSheet(path string) {
 
 }
 
-var letters = []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"}
-
-func writeLine(sheet, line string, vals []string) {
-	for i, val := range vals {
-		f.SetCellValue(sheet, fmt.Sprintf("%s%s", letters[i], line), val)
-	}
-}
-
-func getRowData(date string) ([]string, error) {
+func getRowData(date string) ([]interface{}, error) {
 	obs, err := bank.GetObservationForDate(date)
 	if err != nil {
-		return []string{colDateString(date), "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"}, nil
+		return []interface{}{colDateString(date), "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"}, nil
 	}
 	three, err := strconv.ParseFloat(obs.Yield3Year.V, 64)
 	if err != nil {
@@ -122,7 +139,7 @@ func getRowData(date string) ([]string, error) {
 
 	avg := (three + five) / 2
 	avg = math.Round(avg*100) / 100
-	return []string{colDateString(date), formatFloat(obs.Average1To3Year.V), formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield3Year.V), formatFloat(fmt.Sprintf("%f", avg)), formatFloat(obs.Yield5Year.V)}, nil
+	return []interface{}{colDateString(date), formatFloat(obs.Average1To3Year.V), formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield3Year.V), formatFloat(fmt.Sprintf("%f", avg)), formatFloat(obs.Yield5Year.V)}, nil
 }
 
 func formatFloat(val string) string {
