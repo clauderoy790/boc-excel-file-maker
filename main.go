@@ -110,8 +110,6 @@ func shiftData(f *excelize.File, col string) error {
 			curr := currCol + fmt.Sprintf("%d", row)
 			previous := currCol + fmt.Sprintf("%d", row-1)
 			v, err := f.GetCellValue(wsjSheet, curr)
-			fmt.Println("Current has: ", v)
-			fmt.Println("presvious is: ", previous)
 			if err != nil {
 				return err
 			}
