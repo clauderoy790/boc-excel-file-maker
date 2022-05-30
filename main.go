@@ -2,18 +2,24 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
 
 	boc "github.com/clauderoy790/bank-of-canada-interests-rates"
+	"github.com/clauderoy790/boc-excel-file-maker/common"
 	"github.com/clauderoy790/boc-excel-file-maker/treasury"
 	"github.com/xuri/excelize/v2"
 )
 
-const header = "Historique taux des obligations\nhttp://www.banqueducanada.ca/taux/taux-dinteret/obligations-canadiennes/\n** À partir du 20/04/2021,Taux 1 an = taux 2 ans\n"
-const startDate = "2014-10-24"
+const oecHeader = "Historique taux des obligations\nhttp://www.banqueducanada.ca/taux/taux-dinteret/obligations-canadiennes/\n** À partir du 20/04/2021,Taux 1 an = taux 2 ans\n"
+
+var treasHeader = "Historique taux des obligations\n\nhttps://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value_month=" + fmt.Sprintf("%04d%02d", time.Now().Year(), int(time.Now().Month())) + "\n"
+
+const startDateOEC = "2014-10-24"
+
+var startDateTreasury = time.Date(2015, 6, 19, 0, 0, 0, 0, time.Local)
+
 const exportPath = "/Users/clauderoy/Desktop/test.xlsx"
 
 var bank boc.BOCInterests
@@ -28,43 +34,73 @@ func main() {
 
 	f = excelize.NewFile()
 	writeOECSheet()
-	writeUSTresory()
+	if err := writeUSTresory(); err != nil {
+		panic(fmt.Errorf("error writing traesury: %w", err))
+	}
 	WriteWallStPrime()
 	// Save spreadsheet
 	if err := f.SaveAs(exportPath); err != nil {
 		panic(fmt.Errorf("failed to write file: %w", err))
 	}
-	// // Initialize astilectron
-	// var a, _ = astilectron.New(log.New(os.Stderr, "", 0), astilectron.Options{
-	// 	AppName:            "<your app name>",
-	// 	AppIconDefaultPath: "<your .png icon>",  // If path is relative, it must be relative to the data directory
-	// 	AppIconDarwinPath:  "<your .icns icon>", // Same here
-	// 	BaseDirectoryPath:  "<where you want the provisioner to install the dependencies>",
-	// 	VersionAstilectron: "<version of Astilectron to utilize such as `0.33.0`>",
-	// 	VersionElectron:    "<version of Electron to utilize such as `4.0.1` | `6.1.2`>",
-	// })
-	// defer a.Close()
-
-	// // Start astilectron
-	// if err := a.Start(); err != nil {
-	// 	panic(fmt.Errorf("fail to start astilectron: %w", err))
-	// }
-
-	// // Blocking pattern
-	// a.Wait()
 }
 
 func writeUSTresory() error {
-	data, err := treasury.FetchData()
-	if err != nil {
-		return fmt.Errorf("error fetching treasury data: %w", err)
-	}
-	fmt.Println("data: ", data)
-	return nil
-	f.NewSheet("US Tresory")
+	dt := time.Now()
+	sheet := "US Tresory"
+	f.NewSheet(sheet)
 	f.SetActiveSheet(1)
-	return nil
 
+	header := getHeader(treasHeader)
+	for i, str := range header {
+		err := f.SetCellValue(sheet, fmt.Sprintf("A%d", (i+1)), str)
+		if err != nil {
+			panic(fmt.Errorf("error setting sheet vlaue: %w", err))
+		}
+	}
+
+	currDate := startDateTreasury
+	now := time.Now()
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	tomorrow.Add(time.Hour * 25)
+	line := 6
+	prevMonth, curMonth := -1, 0
+	var data *treasury.Treasury
+	for {
+		if prevMonth != curMonth {
+			var err error
+			data, err = treasury.FetchData(dt)
+			if err != nil {
+				return fmt.Errorf("error fetching treasury data for date %s: %w", fmt.Sprintf("%v-%v-%v", dt.Year(), int(dt.Month()), dt.Day()), err)
+			}
+
+		}
+
+		rowData := getTreasRowData(currDate, data)
+		if err := f.SetSheetRow(sheet, fmt.Sprintf("A%v", line), &rowData); err != nil {
+			panic(err)
+		}
+		currDate = currDate.Add(24 * time.Hour)
+		prevMonth = curMonth
+		curMonth = int(currDate.Month())
+		line++
+		if currDate.After(now) {
+			break
+		}
+	}
+	return nil
+}
+
+func getTreasRowData(date time.Time, treas *treasury.Treasury) []interface{} {
+	props, err := treas.GetPropsForDate(dateString(date))
+	if err != nil {
+		fmt.Println(fmt.Errorf("error getting props for date: %s: %w", dateString(date), err))
+		return []interface{}{colDateString(date), "n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"}
+	}
+	return []interface{}{colDateString(date), formatFloat(props.Bc1Year.Content), formatFloat(props.Bc2Year.Content), formatFloat(props.Bc3Year.Content), formatFloat(props.Bc4Year.Content), formatFloat(props.Bc5Year.Content), formatFloat(props.Bc6Year.Content), formatFloat(props.Bc7Year.Content), formatFloat(props.Bc8Year.Content), formatFloat(props.Bc10Year.Content)}
+}
+
+func dateString(dt time.Time) string {
+	return fmt.Sprintf("%04d-%02d-%02d", dt.Year(), int(dt.Month()), dt.Day())
 }
 
 func WriteWallStPrime() {
@@ -73,13 +109,12 @@ func WriteWallStPrime() {
 }
 
 func writeOECSheet() {
-	// Create a new sheet.
 	sheet := "OEC"
 	f.SetActiveSheet(0)
 	f.SetSheetName("Sheet1", sheet)
 
-	header := getHeader()
-
+	// header
+	header := getHeader(oecHeader)
 	for i, str := range header {
 		err := f.SetCellValue(sheet, fmt.Sprintf("A%d", (i+1)), str)
 		if err != nil {
@@ -90,28 +125,25 @@ func writeOECSheet() {
 		panic(err)
 	}
 
-	date, err := boc.FormatDate(startDate)
+	date, err := boc.FormatDate(startDateOEC)
 	if err != nil {
 		panic(fmt.Errorf("invalid date format: %w", err))
 	}
-	sDate, err := boc.FormatDate(date)
-	if err != nil {
-		panic(fmt.Errorf("invalid start date formmat: %s", startDate))
-	}
-	dt := parseToDate(sDate)
+	dt := parseToDate(date)
 	currDate := time.Date(dt.year, time.Month(dt.month), dt.day, 0, 0, 0, 0, time.Local)
 	now := time.Now()
 	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	tomorrow.Add(time.Hour * 25)
 	line := 6
 	for {
-		data, err := getRowData(fmt.Sprintf("%v-%v-%v", currDate.Year(), int(currDate.Month()), currDate.Day()))
+		data, err := getOECRowData(currDate)
 		if err != nil {
 			panic(fmt.Errorf("error building row: %w", err))
 		}
 		if err := f.SetSheetRow(sheet, fmt.Sprintf("A%v", line), &data); err != nil {
 			panic(err)
 		}
+		fmt.Println("currdate: ", currDate)
 		//  writeLine(sheet, strconv.Itoa(line), data)
 		currDate = currDate.Add(24 * time.Hour)
 		line++
@@ -119,11 +151,11 @@ func writeOECSheet() {
 			break
 		}
 	}
-
 }
 
-func getRowData(date string) ([]interface{}, error) {
-	obs, err := bank.GetObservationForDate(date)
+func getOECRowData(date time.Time) ([]interface{}, error) {
+
+	obs, err := bank.GetObservationForDate(dateString(date))
 	if err != nil {
 		return []interface{}{colDateString(date), "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"}, nil
 	}
@@ -137,18 +169,14 @@ func getRowData(date string) ([]interface{}, error) {
 		return nil, fmt.Errorf("invalid 5 year yield value: %s", obs.Yield5Year.V)
 	}
 
-	avg := (three + five) / 2
-	avg = math.Round(avg*100) / 100
-	return []interface{}{colDateString(date), formatFloat(obs.Average1To3Year.V), formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield3Year.V), formatFloat(fmt.Sprintf("%f", avg)), formatFloat(obs.Yield5Year.V)}, nil
+	avg := common.Average(three, five)
+	return []interface{}{
+		colDateString(date), formatFloat(obs.Average1To3Year.V), formatFloat(obs.Yield2Year.V),
+		formatFloat(obs.Yield2Year.V), formatFloat(obs.Yield3Year.V), formatFloat(fmt.Sprintf("%f", avg)),
+		formatFloat(obs.Yield5Year.V)}, nil
 }
 
-func formatFloat(val string) string {
-	f, _ := strconv.ParseFloat(val, 64)
-	f /= 100
-	return fmt.Sprintf("%.4f", f)
-}
-
-func getHeader() []string {
+func getHeader(header string) []string {
 	var headers []string
 	headers = strings.Split(header, "\n")
 	headers = append(headers, "\n")
@@ -159,8 +187,8 @@ type date struct {
 	year, month, day int
 }
 
-func colDateString(date string) string {
-	d := parseToDate(date)
+func colDateString(date time.Time) string {
+	d := parseToDate(dateString(date))
 	return fmt.Sprintf("%d/%d/%d", d.month, d.day, d.year)
 }
 
@@ -174,4 +202,10 @@ func parseToDate(d string) date {
 		month: m,
 		day:   day,
 	}
+}
+
+func formatFloat(val string) string {
+	f, _ := strconv.ParseFloat(val, 64)
+	f /= 100
+	return fmt.Sprintf("%.4f", f)
 }
