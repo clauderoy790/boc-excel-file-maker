@@ -87,7 +87,7 @@ func updateWSJ() error {
 			return fmt.Errorf("error shifting data: %w", err)
 		}
 	}
-	if newData.us.val != currentData.can.val {
+	if newData.us.val != currentData.us.val {
 		if err := shiftData(f, "J"); err != nil {
 			return fmt.Errorf("error shifting data: %w", err)
 		}
