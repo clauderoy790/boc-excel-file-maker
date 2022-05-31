@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +18,7 @@ import (
 )
 
 const downloadPath = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month="
+const cachePath = "./cache"
 
 func newTreasury(d time.Time) *Treasury {
 	path := fmt.Sprintf("%s%02d%02d", downloadPath, d.Year(), int(d.Month()))
@@ -29,26 +34,31 @@ type Treasury struct {
 	props map[string]*Properties
 }
 
-func (t *Treasury) fetchData() error {
+func (t *Treasury) fetchData() ([]byte, error) {
 	var resp *http.Response
 	var err error
 	if resp, err = http.Get(t.path); err != nil {
-		return fmt.Errorf("error sending request: %w", err)
+		return nil, fmt.Errorf("error sending request: %w", err)
 	}
 	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("error reading body: %w", err)
+		return nil, fmt.Errorf("error reading body: %w", err)
 	}
 	bodyStr := string(bytes)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("got error status code: %d with response: %s", resp.StatusCode, bodyStr)
+		return nil, fmt.Errorf("got error status code: %d with response: %s", resp.StatusCode, bodyStr)
 	}
 	jsonData, err := xj.Convert(strings.NewReader(bodyStr))
 	if err != nil {
-		return fmt.Errorf("fail to convert XML to json: %w", err)
+		return nil, fmt.Errorf("fail to convert XML to json: %w", err)
 	}
+	return jsonData.Bytes(), nil
+
+}
+
+func (t *Treasury) setDataFromBytes(jsonBytes []byte) error {
 	treasury := new(TreasuryData)
-	if err := json.Unmarshal(jsonData.Bytes(), treasury); err != nil {
+	if err := json.Unmarshal(jsonBytes, treasury); err != nil {
 		return fmt.Errorf("error while unmarshalling: %w", err)
 	}
 
@@ -97,9 +107,32 @@ func (t *Treasury) GetPropsForDate(date string) (*Properties, error) {
 
 func FetchData(dt time.Time) (*Treasury, error) {
 	t := newTreasury(dt)
-	if err := t.fetchData(); err != nil {
-		return nil, fmt.Errorf("error fetching data: %w", err)
+	ex, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get executable path: %w", err)
 	}
+	wd := filepath.Dir(ex)
+	cache := path.Join(wd, cachePath)
+	if _, err := os.Stat(cache); os.IsNotExist(err) {
+		os.Mkdir(cache, 0755)
+	}
+	jsonFile := path.Join(cache, dateString(dt)+".json")
+	var data []byte
+	if _, err := os.Stat(jsonFile); err == nil {
+		data, err = ioutil.ReadFile(jsonFile)
+		if err != nil {
+			return nil, fmt.Errorf("error restoring cache file %s: %w", jsonFile, err)
+		}
+	} else {
+		data, err = t.fetchData()
+		if err != nil {
+			return nil, fmt.Errorf("error fetching data: %w", err)
+		}
+		if err := ioutil.WriteFile(jsonFile, data, 0755); err != nil {
+			return nil, fmt.Errorf("error writing cached file %s: %w", jsonFile, err)
+		}
+	}
+	t.setDataFromBytes(data)
 	return t, nil
 }
 
@@ -141,4 +174,8 @@ type Entry struct {
 type Feed struct {
 	Updated time.Time `json:"updated"`
 	Entry   []*Entry  `json:"entry"`
+}
+
+func dateString(dt time.Time) string {
+	return fmt.Sprintf("%04d-%02d-%02d", dt.Year(), int(dt.Month()), dt.Day())
 }

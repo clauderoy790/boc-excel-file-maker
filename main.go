@@ -9,6 +9,11 @@ import (
 	"time"
 	"unicode"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/widget"
 	"github.com/PuerkitoBio/goquery"
 	boc "github.com/clauderoy790/bank-of-canada-interests-rates"
 	"github.com/clauderoy790/boc-excel-file-maker/common"
@@ -26,37 +31,76 @@ const startDateOEC = "2014-10-24"
 
 var startDateTreasury = time.Date(2015, 6, 19, 0, 0, 0, 0, time.Local)
 
-const filePath = "/Users/clauderoy/Desktop/test.xlsx"
+const filePath = "./rates.xlsx"
 
 var bank boc.BOCInterests
 
 func main() {
+	startApp()
+}
+
+func startApp() {
+	a := app.New()
+	w := a.NewWindow("Bank Rates Excel")
+	w.Resize(fyne.Size{
+		Width:  640,
+		Height: 480,
+	})
+	infinite := widget.NewProgressBarInfinite()
+	progress := container.NewVBox(infinite)
+	infinite.Show()
+
+	var btn *fyne.Container
+	btn = container.NewVBox(
+		widget.NewButton("Generate Excel", func() {
+			w.SetContent(progress)
+			err := writeExcelFile()
+			infinite.Hide()
+			w.SetContent(btn)
+			if err != nil {
+				e := dialog.NewError(fmt.Errorf("there was an error!: %w", err), w)
+				fmt.Println(err)
+				e.Show()
+			} else {
+				confirm := dialog.NewInformation("Success!", "Your file was generated successfully!", w)
+				confirm.Show()
+			}
+		}),
+	)
+
+	w.SetContent(btn)
+
+	w.ShowAndRun()
+}
+
+func writeExcelFile() error {
 	var err error
 	bank, err = boc.NewBOCInterests()
 	if err != nil {
-		panic(fmt.Errorf("error creating boc: %w", err))
+		return fmt.Errorf("error creating boc: %w", err)
 	}
 
 	f := excelize.NewFile()
 	writeOECSheet(f)
 	if err := writeUSTresory(f); err != nil {
-		panic(fmt.Errorf("error writing traesury: %w", err))
+		return fmt.Errorf("error writing traesury: %w", err)
 	}
 	if err := WriteWallStPrime(f); err != nil {
-		panic(fmt.Errorf("error writing WSJ: %w", err))
+		return fmt.Errorf("error writing WSJ: %w", err)
 	}
 	f.SetActiveSheet(0)
 	// Save spreadsheet
 	if err := f.SaveAs(filePath); err != nil {
-		panic(fmt.Errorf("failed to write file: %w", err))
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 	f.Close()
 
 	time.Sleep(time.Second * 2)
 
 	if err := updateWSJ(); err != nil {
-		panic(fmt.Errorf("error updating wsj: %w", err))
+		return fmt.Errorf("error updating wsj: %w", err)
 	}
+	return nil
 }
 
 func updateWSJ() error {
